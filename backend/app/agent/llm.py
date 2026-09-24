@@ -52,12 +52,12 @@ class LLMClient:
         return self.settings.llm_enabled
 
     def chat(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        *,
-        temperature: float = 0.0,
-        response_format: dict[str, Any] | None = None,
+    self,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    *,
+    temperature: float = 0.0,
+    response_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
         if not self.enabled:
             raise LLMNotConfigured(
@@ -70,16 +70,25 @@ class LLMClient:
             "messages": messages,
             "temperature": temperature,
         }
+
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+
         if response_format:
             payload["response_format"] = response_format
 
+        url = (
+            f"{self.settings.llm_api_base.rstrip('/')}"
+            "/chat/completions"
+        )
+
         try:
-            with httpx.Client(timeout=self.settings.llm_timeout_seconds) as client:
+            with httpx.Client(
+                timeout=self.settings.llm_timeout_seconds
+            ) as client:
                 resp = client.post(
-                    f"{self.settings.llm_api_base.rstrip('/')}/chat/completions",
+                    url,
                     headers={
                         "Authorization": f"Bearer {self.settings.llm_api_key}",
                         "Content-Type": "application/json",
@@ -87,31 +96,50 @@ class LLMClient:
                     json=payload,
                 )
         except httpx.HTTPError as exc:
-            # Never let provider detail (which can contain the key in a URL)
-            # bubble up to the API surface.
             logger.exception("LLM transport error")
-            raise LLMError("The language model is currently unreachable.") from exc
+            raise LLMError(
+                "The language model is currently unreachable."
+            ) from exc
 
         if resp.status_code >= 400:
-            logger.error("LLM returned %s: %s", resp.status_code, resp.text[:500])
-            raise LLMError("The language model returned an error.")
+            logger.error(
+                "LLM returned HTTP %s: %s",
+                resp.status_code,
+                resp.text[:1000],
+            )
+            raise LLMError(
+                "The language model returned an error."
+            )
 
         try:
-            message = resp.json()["choices"][0]["message"]
-        except (KeyError, IndexError, ValueError) as exc:
-            logger.exception("Unexpected LLM response shape")
-            raise LLMError("The language model returned an unexpected response.") from exc
+            body = resp.json()
+            message = body["choices"][0]["message"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            logger.exception(
+                "Unexpected LLM response shape"
+            )
+            raise LLMError(
+                "The language model returned an unexpected response."
+            ) from exc
+
+        tool_calls: list[ToolCall] = []
+
+        for tool_call in message.get("tool_calls") or []:
+            function = tool_call.get("function") or {}
+
+            tool_calls.append(
+                ToolCall(
+                    id=tool_call.get("id", ""),
+                    name=function.get("name", ""),
+                    arguments=_safe_json(
+                        function.get("arguments")
+                    ),
+                )
+            )
 
         return LLMResponse(
             content=message.get("content"),
-            tool_calls=[
-                ToolCall(
-                    id=tc["id"],
-                    name=tc["function"]["name"],
-                    arguments=_safe_json(tc["function"].get("arguments")),
-                )
-                for tc in message.get("tool_calls") or []
-            ],
+            tool_calls=tool_calls,
             raw_message=message,
         )
 
