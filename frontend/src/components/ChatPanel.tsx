@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { api } from '../services/api';
 import type { ChatTurn } from '../types';
 
@@ -29,6 +30,7 @@ export function ChatPanel({ onInspectWorkItem }: Props) {
     try {
       const response = await api.chat(trimmed, conversationId.current);
       conversationId.current = response.conversation_id;
+
       setTurns((t) => [
         ...t,
         {
@@ -45,7 +47,11 @@ export function ChatPanel({ onInspectWorkItem }: Props) {
     } catch (error) {
       setTurns((t) => [
         ...t,
-        { role: 'agent', text: (error as Error).message, flavour: 'error' },
+        {
+          role: 'agent',
+          text: (error as Error).message,
+          flavour: 'error',
+        },
       ]);
     } finally {
       setLoading(false);
@@ -60,7 +66,12 @@ export function ChatPanel({ onInspectWorkItem }: Props) {
         {turns.length === 0 && (
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
-              <button key={s} type="button" className="chip" onClick={() => ask(s)}>
+              <button
+                key={s}
+                type="button"
+                className="chip"
+                onClick={() => ask(s)}
+              >
                 {s}
               </button>
             ))}
@@ -68,8 +79,17 @@ export function ChatPanel({ onInspectWorkItem }: Props) {
         )}
 
         {turns.map((turn, index) => (
-          <div key={index} className={`turn ${turn.role} ${turn.flavour ?? ''}`}>
-            <p>{turn.text}</p>
+          <div
+            key={index}
+            className={`turn ${turn.role} ${turn.flavour ?? ''}`}
+          >
+            <div className="message-bubble">
+              {turn.role === 'agent' ? (
+                <ReactMarkdown>{turn.text}</ReactMarkdown>
+              ) : (
+                <p>{turn.text}</p>
+              )}
+            </div>
 
             {turn.evidence && turn.evidence.work_items.length > 0 && (
               <details>
@@ -77,21 +97,32 @@ export function ChatPanel({ onInspectWorkItem }: Props) {
                   Based on {turn.evidence.work_items.length} work item
                   {turn.evidence.work_items.length === 1 ? '' : 's'}
                 </summary>
+
                 <ul className="evidence">
                   {turn.evidence.work_items.map((item) => (
                     <li key={item.work_item_id}>
-                      <button type="button" className="link" onClick={() => onInspectWorkItem(item.work_item_id)}>
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={() =>
+                          onInspectWorkItem(item.work_item_id)
+                        }
+                      >
                         #{item.work_item_id}
                       </button>{' '}
                       {item.title ?? ''}
                     </li>
                   ))}
                 </ul>
+
                 {Object.keys(turn.evidence.filters_applied).length > 0 && (
                   <p className="note">
                     Filters applied:{' '}
                     {Object.entries(turn.evidence.filters_applied)
-                      .map(([k, v]) => `${k.replace(/_/g, ' ')} = ${v}`)
+                      .map(
+                        ([k, v]) =>
+                          `${k.replace(/_/g, ' ')} = ${v}`,
+                      )
                       .join(', ')}
                   </p>
                 )}
@@ -117,7 +148,13 @@ export function ChatPanel({ onInspectWorkItem }: Props) {
           aria-label="Ask a question about the time-logging data"
           disabled={loading}
         />
-        <button type="submit" disabled={loading || !input.trim()}>Ask</button>
+
+        <button
+          type="submit"
+          disabled={loading || !input.trim()}
+        >
+          Ask
+        </button>
       </form>
 
       {turns.length > 0 && (
